@@ -25,7 +25,7 @@
 
 SCALE=$1
 
-bash ./pkg/function/deploy.sh \
+bash ./pkg/driver/deploy.sh \
     workloads/container/trace_func_go.yaml \
     myfunc \
     100Gi \
