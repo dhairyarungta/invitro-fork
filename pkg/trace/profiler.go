@@ -47,6 +47,10 @@ func ApplyResourceLimits(functions []*common.Function, CPULimit string) {
 		switch CPULimit {
 		case "1vCPU":
 			cpuShare = 1000
+		case "2vCPU":
+			cpuShare = 2000
+		case "3vCPU":
+			cpuShare = 3000
 		case "GCP":
 			cpuShare = ConvertMemoryToCpu(memoryPct100)
 		}
