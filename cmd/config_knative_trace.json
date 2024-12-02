@@ -11,7 +11,7 @@
   "TracePath": "data/traces/example_normal",
   "Granularity": "minute",
   "OutputPathPrefix": "data/out/experiment",
-  "IATDistribution": "exponential",
+  "IATDistribution": "equidistant",
   "CPULimit": "1vCPU",
   "ExperimentDuration": 5,
   "WarmupDuration": 2,
