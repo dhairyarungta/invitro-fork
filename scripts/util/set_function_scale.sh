@@ -25,11 +25,12 @@
 
 SCALE=$1
 
-bash ./pkg/function/deploy.sh \
+bash ./pkg/driver/deploy.sh \
     workloads/container/trace_func_go.yaml \
     myfunc \
-    100Gi \
     1000m \
+    1000m \
+    100Gi \
     $SCALE \
     '"10.0"' \
     '"200.0"'
