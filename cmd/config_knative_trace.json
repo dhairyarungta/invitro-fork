@@ -8,17 +8,17 @@
 
   "BusyLoopOnSandboxStartup": false,
 
-  "TracePath": "data/traces/example",
+  "TracePath": "data/traces/sampled_150/",
   "Granularity": "minute",
   "OutputPathPrefix": "data/out/experiment",
   "IATDistribution": "exponential",
   "CPULimit": "1vCPU",
-  "ExperimentDuration": 30,
-  "WarmupDuration": 0,
+  "ExperimentDuration": 40,
+  "WarmupDuration": 20,
 
   "IsPartiallyPanic": false,
   "EnableZipkinTracing": false,
-  "EnableMetricsScrapping": false,
+  "EnableMetricsScrapping": true,
   "MetricScrapingPeriodSeconds": 15,
   "AutoscalingMetric": "concurrency",
 
