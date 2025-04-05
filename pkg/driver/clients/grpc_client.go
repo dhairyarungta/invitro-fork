@@ -112,60 +112,140 @@ func (i SayHelloRPC) Invoke(function *common.Function, runtimeSpec *common.Runti
 type grpcInvoker struct {
 	cfg     *config.LoaderConfiguration
 	invoker invoker
+	connPool *ConnectionPool
 }
 
 func newGRPCInvoker(cfg *config.LoaderConfiguration, invoker invoker) *grpcInvoker {
+	var dialOptions []grpc.DialOption
+	dialOptions = append(dialOptions, 
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+	if strings.contains(cfg.Platform, common PlatformDirigent) {
+		dialOptions = append(dialOptions, grpc.WithAuthority("pooled-authority"))
+	}
+
+	if cfg.EnableZipkinTracing {
+		dialOptions = append (dialOptions, 
+			grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
+	}
+	// Insert the keepalive parameters here
+	dialOptions = append(dialOptions, 
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                10 * time.Second,
+			Timeout:             5 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	)
+
+    // Create a connection pool with a reasonable number of idle connections per endpoint
+    // Adjust the maxIdleConns value based on your workload characteristics
+
 	return &grpcInvoker{
 		cfg:     cfg,
 		invoker: invoker,
+		connPool : NewConnectionPool(1000, dialOptions),
 	}
+}
+
+// func (i *grpcInvoker) Invoke(function *common.Function, runtimeSpec *common.RuntimeSpecification) (bool, *mc.ExecutionRecord) {
+// 	logrus.Tracef("(Invoke)\t %s: %d[ms], %d[MiB]", function.Name, runtimeSpec.Runtime, runtimeSpec.Memory)
+
+// 	record := &mc.ExecutionRecord{
+// 		ExecutionRecordBase: mc.ExecutionRecordBase{
+// 			RequestedDuration: uint32(runtimeSpec.Runtime * 1e3),
+// 		},
+// 	}
+
+// 	////////////////////////////////////
+// 	// INVOKE FUNCTION
+// 	////////////////////////////////////
+// 	start := time.Now()
+// 	record.StartTime = start.UnixMicro()
+
+// 	var dialOptions []grpc.DialOption
+// 	dialOptions = append(dialOptions, grpc.WithTransportCredentials(insecure.NewCredentials()))
+// 	if strings.Contains(i.cfg.Platform, common.PlatformDirigent) {
+// 		dialOptions = append(dialOptions, grpc.WithAuthority(function.Name)) // Dirigent specific
+// 	}
+// 	if i.cfg.EnableZipkinTracing {
+// 		dialOptions = append(dialOptions, grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
+// 	}
+
+// 	grpcStart := time.Now()
+
+// 	// conn, err := grpc.NewClient("passthrough:///"+function.Endpoint, dialOptions...)
+// 	conn, err := i.connPool.Get(function.Endpoint)
+
+// 	if err != nil {
+// 		logrus.Debugf("Failed to establish a gRPC connection from pool - %v\n", err)
+
+// 		record.ResponseTime = time.Since(start).Microseconds()
+// 		record.ConnectionTimeout = true
+
+// 		return false, record
+// 	}
+// 	// defer gRPCConnectionClose(conn)
+
+// 	record.GRPCConnectionEstablishTime = time.Since(grpcStart).Microseconds()
+// 	executionCxt, cancelExecution := context.WithTimeout(context.Background(), time.Duration(i.cfg.GRPCFunctionTimeoutSeconds)*time.Second)
+// 	success := i.invoker.Invoke(function, runtimeSpec, conn, record, executionCxt)
+// 	// defer cancelExecution()
+// 	cancelExecution()
+// 	i.connPool.Put(function.Endpoint, conn)
+// 	record.ResponseTime = time.Since(start).Microseconds()
+// 	logrus.Tracef("(E2E Latency) %s: %.2f[ms]\n", function.Name, float64(record.ResponseTime)/1e3)
+// 	return success, record
+// }
+func (i *grpcInvoker) Close() {
+    if i.connPool != nil {
+        i.connPool.Close()
+    }
 }
 
 func (i *grpcInvoker) Invoke(function *common.Function, runtimeSpec *common.RuntimeSpecification) (bool, *mc.ExecutionRecord) {
-	logrus.Tracef("(Invoke)\t %s: %d[ms], %d[MiB]", function.Name, runtimeSpec.Runtime, runtimeSpec.Memory)
+    logrus.Tracef("(Invoke)\t %s: %d[ms], %d[MiB]", function.Name, runtimeSpec.Runtime, runtimeSpec.Memory)
+    record := &mc.ExecutionRecord{
+        ExecutionRecordBase: mc.ExecutionRecordBase{
+            RequestedDuration: uint32(runtimeSpec.Runtime * 1e3),
+        },
+    }
 
-	record := &mc.ExecutionRecord{
-		ExecutionRecordBase: mc.ExecutionRecordBase{
-			RequestedDuration: uint32(runtimeSpec.Runtime * 1e3),
-		},
-	}
+    ////////////////////////////////////
+    // INVOKE FUNCTION
+    ////////////////////////////////////
+    start := time.Now()
+    record.StartTime = start.UnixMicro()
+    
+    // Use authority specific to this function if needed
+    if strings.Contains(i.cfg.Platform, common.PlatformDirigent) {
+        // Add function-specific authority to the pool if needed
+        // This is a bit tricky and might require special handling
+    }
+    
+    grpcStart := time.Now()
+    // Get connection from pool
+    conn, err := i.connPool.Get(function.Endpoint)
+    if err != nil {
+        logrus.Debugf("Failed to get a gRPC connection from pool - %v\n", err)
+        record.ResponseTime = time.Since(start).Microseconds()
+        record.ConnectionTimeout = true
+        return false, record
+    }
 
-	////////////////////////////////////
-	// INVOKE FUNCTION
-	////////////////////////////////////
-	start := time.Now()
-	record.StartTime = start.UnixMicro()
-
-	var dialOptions []grpc.DialOption
-	dialOptions = append(dialOptions, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if strings.Contains(i.cfg.Platform, common.PlatformDirigent) {
-		dialOptions = append(dialOptions, grpc.WithAuthority(function.Name)) // Dirigent specific
-	}
-	if i.cfg.EnableZipkinTracing {
-		dialOptions = append(dialOptions, grpc.WithStatsHandler(otelgrpc.NewClientHandler()))
-	}
-
-	grpcStart := time.Now()
-
-	conn, err := grpc.NewClient("passthrough:///"+function.Endpoint, dialOptions...)
-	if err != nil {
-		logrus.Debugf("Failed to establish a gRPC connection - %v\n", err)
-
-		record.ResponseTime = time.Since(start).Microseconds()
-		record.ConnectionTimeout = true
-
-		return false, record
-	}
-	defer gRPCConnectionClose(conn)
-
-	record.GRPCConnectionEstablishTime = time.Since(grpcStart).Microseconds()
-	executionCxt, cancelExecution := context.WithTimeout(context.Background(), time.Duration(i.cfg.GRPCFunctionTimeoutSeconds)*time.Second)
-	defer cancelExecution()
-	success := i.invoker.Invoke(function, runtimeSpec, conn, record, executionCxt)
-	record.ResponseTime = time.Since(start).Microseconds()
-	logrus.Tracef("(E2E Latency) %s: %.2f[ms]\n", function.Name, float64(record.ResponseTime)/1e3)
-	return success, record
+    record.GRPCConnectionEstablishTime = time.Since(grpcStart).Microseconds()
+    executionCxt, cancelExecution := context.WithTimeout(context.Background(), time.Duration(i.cfg.GRPCFunctionTimeoutSeconds)*time.Second)
+    
+    success := i.invoker.Invoke(function, runtimeSpec, conn, record, executionCxt)
+    cancelExecution() // Cancel context after use
+    
+    // Return connection to pool instead of closing
+    i.connPool.Put(function.Endpoint, conn)
+    
+    record.ResponseTime = time.Since(start).Microseconds()
+    logrus.Tracef("(E2E Latency) %s: %.2f[ms]\n", function.Name, float64(record.ResponseTime)/1e3)
+    return success, record
 }
+
 
 func extractInstanceName(data string) string {
 	indexOfHyphen := strings.LastIndex(data, common.FunctionNamePrefix)

@@ -380,78 +380,121 @@ func (d *Driver) startBackgroundProcesses(allRecordsWritten *sync.WaitGroup) (*s
 }
 
 func (d *Driver) internalRun() {
-	var successfulInvocations int64
-	var failedInvocations int64
-	var invocationsIssued int64
-
-	allFunctionsInvoked := sync.WaitGroup{}
-	allIndividualDriversCompleted := sync.WaitGroup{}
-	allRecordsWritten := sync.WaitGroup{}
-	allRecordsWritten.Add(1)
-
-	backgroundProcessesInitializationBarrier, globalMetricsCollector, totalIssuedChannel, scraperFinishCh := d.startBackgroundProcesses(&allRecordsWritten)
-	backgroundProcessesInitializationBarrier.Wait()
-
-	if d.Configuration.LoaderConfiguration.DAGMode {
-		functions := d.Configuration.Functions
-		dagLists := generator.GenerateDAGs(d.Configuration.LoaderConfiguration, functions, false)
-		log.Infof("Starting DAG invocation driver\n")
-		for i := range len(dagLists) {
-			allIndividualDriversCompleted.Add(1)
-			go d.functionsDriver(
-				dagLists[i],
-				&allIndividualDriversCompleted,
-				&allFunctionsInvoked,
-				&successfulInvocations,
-				&failedInvocations,
-				&invocationsIssued,
-				globalMetricsCollector,
-			)
-		}
-	} else {
-		log.Infof("Starting function invocation driver\n")
-		for _, function := range d.Configuration.Functions {
-			allIndividualDriversCompleted.Add(1)
-			functionLinkedList := list.New()
-			functionLinkedList.PushBack(&common.Node{Function: function, Depth: 0})
-			go d.functionsDriver(
-				functionLinkedList,
-				&allIndividualDriversCompleted,
-				&allFunctionsInvoked,
-				&successfulInvocations,
-				&failedInvocations,
-				&invocationsIssued,
-				globalMetricsCollector,
-			)
-		}
-	}
-	allIndividualDriversCompleted.Wait()
-	if atomic.LoadInt64(&successfulInvocations)+atomic.LoadInt64(&failedInvocations) != 0 {
-		log.Debugf("Waiting for all the invocations record to be written.\n")
-
-		if d.Configuration.DirigentConfiguration != nil && d.Configuration.DirigentConfiguration.AsyncMode {
-			sleepFor := time.Duration(d.Configuration.DirigentConfiguration.AsyncWaitToCollectMin) * time.Minute
-
-			log.Infof("Sleeping for %v...", sleepFor)
-			time.Sleep(sleepFor)
-
-			d.writeAsyncRecordsToLog(globalMetricsCollector)
-		}
-		totalIssuedChannel <- atomic.LoadInt64(&invocationsIssued)
-		scraperFinishCh <- 0 // Ask the scraper to finish metrics collection
-
-		allRecordsWritten.Wait()
-	}
-
-	statSuccess := atomic.LoadInt64(&successfulInvocations)
-	statFailed := atomic.LoadInt64(&failedInvocations)
-
-	log.Infof("Trace has finished executing function invocation driver\n")
-	log.Infof("Number of successful invocations: \t%d", statSuccess)
-	log.Infof("Number of failed invocations: \t%d", statFailed)
-	log.Infof("Total invocations: \t\t\t%d", statSuccess+statFailed)
-	log.Infof("Failure rate: \t\t\t%.2f%%", float64(statFailed)*100.0/float64(statSuccess+statFailed))
+    var successfulInvocations int64
+    var failedInvocations int64
+    var invocationsIssued int64
+    allFunctionsInvoked := sync.WaitGroup{}
+    allIndividualDriversCompleted := sync.WaitGroup{}
+    allRecordsWritten := sync.WaitGroup{}
+    allRecordsWritten.Add(1)
+    backgroundProcessesInitializationBarrier, globalMetricsCollector, totalIssuedChannel, scraperFinishCh := d.startBackgroundProcesses(&allRecordsWritten)
+    backgroundProcessesInitializationBarrier.Wait()
+    
+    // DAG mode or function invocation code...
+    
+    allIndividualDriversCompleted.Wait()
+    if atomic.LoadInt64(&successfulInvocations)+atomic.LoadInt64(&failedInvocations) != 0 {
+        log.Debugf("Waiting for all the invocations record to be written.\n")
+        if d.Configuration.DirigentConfiguration != nil && d.Configuration.DirigentConfiguration.AsyncMode {
+            sleepFor := time.Duration(d.Configuration.DirigentConfiguration.AsyncWaitToCollectMin) * time.Minute
+            log.Infof("Sleeping for %v...", sleepFor)
+            time.Sleep(sleepFor)
+            d.writeAsyncRecordsToLog(globalMetricsCollector)
+        }
+    }
+    
+    totalIssuedChannel <- atomic.LoadInt64(&invocationsIssued)
+    scraperFinishCh <- 0 // Ask the scraper to finish metrics collection
+    allRecordsWritten.Wait()
+    
+    // ADD YOUR CLOSING CODE HERE, right after allRecordsWritten.Wait()
+    // Close the connection pool if it exists
+    if invoker, ok := d.Invoker.(*clients.GrpcInvoker); ok {
+        invoker.Close()
+    }
+    
+    statSuccess := atomic.LoadInt64(&successfulInvocations)
+    statFailed := atomic.LoadInt64(&failedInvocations)
+    log.Infof("Trace has finished executing function invocation driver\n")
+    log.Infof("Number of successful invocations: \t%d", statSuccess)
+    log.Infof("Number of failed invocations: \t%d", statFailed)
+    log.Infof("Total invocations: \t\t\t%d", statSuccess+statFailed)
+    log.Infof("Failure rate: \t\t\t%.2f%%", float64(statFailed)*100.0/float64(statSuccess+statFailed))
 }
+
+// func (d *Driver) internalRun() {
+// 	var successfulInvocations int64
+// 	var failedInvocations int64
+// 	var invocationsIssued int64
+
+// 	allFunctionsInvoked := sync.WaitGroup{}
+// 	allIndividualDriversCompleted := sync.WaitGroup{}
+// 	allRecordsWritten := sync.WaitGroup{}
+// 	allRecordsWritten.Add(1)
+
+// 	backgroundProcessesInitializationBarrier, globalMetricsCollector, totalIssuedChannel, scraperFinishCh := d.startBackgroundProcesses(&allRecordsWritten)
+// 	backgroundProcessesInitializationBarrier.Wait()
+
+// 	if d.Configuration.LoaderConfiguration.DAGMode {
+// 		functions := d.Configuration.Functions
+// 		dagLists := generator.GenerateDAGs(d.Configuration.LoaderConfiguration, functions, false)
+// 		log.Infof("Starting DAG invocation driver\n")
+// 		for i := range len(dagLists) {
+// 			allIndividualDriversCompleted.Add(1)
+// 			go d.functionsDriver(
+// 				dagLists[i],
+// 				&allIndividualDriversCompleted,
+// 				&allFunctionsInvoked,
+// 				&successfulInvocations,
+// 				&failedInvocations,
+// 				&invocationsIssued,
+// 				globalMetricsCollector,
+// 			)
+// 		}
+// 	} else {
+// 		log.Infof("Starting function invocation driver\n")
+// 		for _, function := range d.Configuration.Functions {
+// 			allIndividualDriversCompleted.Add(1)
+// 			functionLinkedList := list.New()
+// 			functionLinkedList.PushBack(&common.Node{Function: function, Depth: 0})
+// 			go d.functionsDriver(
+// 				functionLinkedList,
+// 				&allIndividualDriversCompleted,
+// 				&allFunctionsInvoked,
+// 				&successfulInvocations,
+// 				&failedInvocations,
+// 				&invocationsIssued,
+// 				globalMetricsCollector,
+// 			)
+// 		}
+// 	}
+// 	allIndividualDriversCompleted.Wait()
+// 	if atomic.LoadInt64(&successfulInvocations)+atomic.LoadInt64(&failedInvocations) != 0 {
+// 		log.Debugf("Waiting for all the invocations record to be written.\n")
+
+// 		if d.Configuration.DirigentConfiguration != nil && d.Configuration.DirigentConfiguration.AsyncMode {
+// 			sleepFor := time.Duration(d.Configuration.DirigentConfiguration.AsyncWaitToCollectMin) * time.Minute
+
+// 			log.Infof("Sleeping for %v...", sleepFor)
+// 			time.Sleep(sleepFor)
+
+// 			d.writeAsyncRecordsToLog(globalMetricsCollector)
+// 		}
+// 		totalIssuedChannel <- atomic.LoadInt64(&invocationsIssued)
+// 		scraperFinishCh <- 0 // Ask the scraper to finish metrics collection
+
+// 		allRecordsWritten.Wait()
+// 	}
+
+// 	statSuccess := atomic.LoadInt64(&successfulInvocations)
+// 	statFailed := atomic.LoadInt64(&failedInvocations)
+
+// 	log.Infof("Trace has finished executing function invocation driver\n")
+// 	log.Infof("Number of successful invocations: \t%d", statSuccess)
+// 	log.Infof("Number of failed invocations: \t%d", statFailed)
+// 	log.Infof("Total invocations: \t\t\t%d", statSuccess+statFailed)
+// 	log.Infof("Failure rate: \t\t\t%.2f%%", float64(statFailed)*100.0/float64(statSuccess+statFailed))
+// }
 
 func (d *Driver) GenerateSpecification() {
 	log.Info("Generating IAT and runtime specifications for all the functions")
