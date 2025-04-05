@@ -28,6 +28,7 @@ import (
 	"context"
 	"strings"
 	"time"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -185,13 +186,13 @@ func (i SayHelloRPC) Invoke(function *common.Function, runtimeSpec *common.Runti
 	return true
 }
 
-type grpcInvoker struct {
+type GrpcInvoker struct {
 	cfg     *config.LoaderConfiguration
 	invoker invoker
 	connPool     *ConnectionPool
 }
 
-func newGRPCInvoker(cfg *config.LoaderConfiguration, invoker invoker) *grpcInvoker {
+func newGRPCInvoker(cfg *config.LoaderConfiguration, invoker invoker) *GrpcInvoker {
     // Create dial options
     var dialOptions []grpc.DialOption
     dialOptions = append(dialOptions, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -205,14 +206,14 @@ func newGRPCInvoker(cfg *config.LoaderConfiguration, invoker invoker) *grpcInvok
     
     // Create a connection pool with a reasonable number of idle connections per endpoint
     // Adjust the maxIdleConns value based on your workload characteristics
-    return &grpcInvoker{
+    return &GrpcInvoker{
         cfg:      cfg,
         invoker:  invoker,
         connPool: NewConnectionPool(100, dialOptions),
     }
 }
 
-func (i *grpcInvoker) Invoke(function *common.Function, runtimeSpec *common.RuntimeSpecification) (bool, *mc.ExecutionRecord) {
+func (i *GrpcInvoker) Invoke(function *common.Function, runtimeSpec *common.RuntimeSpecification) (bool, *mc.ExecutionRecord) {
 	logrus.Tracef("(Invoke)\t %s: %d[ms], %d[MiB]", function.Name, runtimeSpec.Runtime, runtimeSpec.Memory)
 
 	record := &mc.ExecutionRecord{
@@ -262,7 +263,7 @@ func (i *grpcInvoker) Invoke(function *common.Function, runtimeSpec *common.Runt
 	return success, record
 }
 
-func (i *grpcInvoker) Close() {
+func (i *GrpcInvoker) Close() {
     if i.connPool != nil {
         i.connPool.Close()
     }
