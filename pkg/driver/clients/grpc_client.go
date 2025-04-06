@@ -209,7 +209,7 @@ func newGRPCInvoker(cfg *config.LoaderConfiguration, invoker invoker) *GrpcInvok
     return &GrpcInvoker{
         cfg:      cfg,
         invoker:  invoker,
-        connPool: NewConnectionPool(100, dialOptions),
+        connPool: NewConnectionPool(500, dialOptions),
     }
 }
 
